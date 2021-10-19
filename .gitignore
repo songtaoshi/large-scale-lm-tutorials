@@ -658,6 +658,7 @@ paket-files/
 .idea/*
 # OpenCover UI analysis results
 OpenCover/
+.DS_Store
 
 # Azure Stream Analytics local run output
 ASALocalRun/
