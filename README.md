@@ -1,2 +1,2 @@
-# large-scale-transformers-examples
+# large-scale-transformers
 Examples of large scale transformers modeling (for KISTi)
