@@ -1,5 +1,5 @@
 """
-p2p_communication.py
+p2p_communication_non_blocking.py
 """
 
 import torch
@@ -10,14 +10,13 @@ dist.init_process_group("gloo")
 
 if dist.get_rank() == 0:
     tensor = torch.randn(2, 2)
-    print(f"rank 0 send: {tensor}\n")
-    dist.send(tensor, dst=1)
-
+    request = dist.isend(tensor, dst=1)
 elif dist.get_rank() == 1:
     tensor = torch.zeros(2, 2)
-    print(f"rank 1 before: {tensor}\n")
-    dist.recv(tensor, src=0)
-    print(f"rank 1 after: {tensor}\n")
-
+    request = dist.irecv(tensor, src=0)
 else:
     raise RuntimeError("wrong rank")
+
+request.wait()
+
+print(f"rank {dist.get_rank()}: {tensor}")

@@ -16,7 +16,7 @@ os.environ["MASTER_ADDR"] = "localhost"  # 통신할 주소 (보통 localhost를
 os.environ["MASTER_PORT"] = "29500"  # 통신할 포트 (임의의 값을 설정해도 좋습니다.)
 
 dist.init_process_group(backend="nccl", rank=0, world_size=1)
-# 프로세스 그룹 initialization
+# 프로세스 그룹 초기화
 
 process_group = dist.new_group([0])
 # 0번 프로세스가 속한 프로세스 그룹 생성

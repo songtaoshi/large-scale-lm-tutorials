@@ -11,7 +11,9 @@ import os
 def fn(rank, world_size):
     # rank는 기본적으로 들어옴. world_size는 입력됨.
     dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+    # 프로세스 그룹 초기화
     group = dist.new_group([_ for _ in range(world_size)])
+    # 프로세스 그룹 생성
     print(f"{group} - rank: {rank}")
 
 
