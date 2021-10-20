@@ -1,5 +1,5 @@
 """
-p2p_communication.py
+src/p2p_communication.py
 """
 
 import torch
@@ -10,7 +10,6 @@ dist.init_process_group("gloo")
 
 if dist.get_rank() == 0:
     tensor = torch.randn(2, 2)
-    print(f"rank 0 send: {tensor}\n")
     dist.send(tensor, dst=1)
 
 elif dist.get_rank() == 1:

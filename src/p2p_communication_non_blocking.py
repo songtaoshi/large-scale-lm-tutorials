@@ -1,5 +1,5 @@
 """
-p2p_communication_non_blocking.py
+src/p2p_communication_non_blocking.py
 """
 
 import torch
