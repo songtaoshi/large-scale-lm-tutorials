@@ -8,7 +8,7 @@ from datasets import load_dataset
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchgpipe import GPipe
-from transformers import GPT2Config, GPT2Tokenizer, GPT2LMHeadModel
+from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block as GPT2BlockBase
 
 
@@ -42,7 +42,7 @@ class GPT2Block(GPT2BlockBase):
         return hidden_states[0]
 
 
-class GPT2PostProcess(nn.Module):
+class GPT2Postprocessing(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.ln_f = nn.LayerNorm(
@@ -71,7 +71,7 @@ def create_model_from_pretrained(model_name):
     for i, block in enumerate(blocks):
         block.__class__ = GPT2Block
 
-    postprocess = GPT2PostProcess(pretrained.config)
+    postprocess = GPT2Postprocessing(pretrained.config)
     postprocess.ln_f.weight = pretrained.transformer.ln_f.weight
     postprocess.ln_f.bias = pretrained.transformer.ln_f.bias
     postprocess.lm_head.weight.data = pretrained.lm_head.weight.data.clone()
