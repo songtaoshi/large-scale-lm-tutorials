@@ -1,15 +1,17 @@
 """
 src/pipe_dream.py
 """
-
+import deepspeed
 import torch
 import torch.nn as nn
 from datasets import load_dataset
+from deepspeed import PipelineModule
 from torch.optim import Adam
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block as GPT2BlockBase
-from deepspeed import PipelineModule
+import torch.distributed as dist
 
 
 class GPT2Preprocessing(nn.Module):
@@ -63,7 +65,6 @@ class GPT2PostProcess(nn.Module):
 
 def create_model_from_pretrained(model_name):
     pretrained = GPT2LMHeadModel.from_pretrained(model_name)
-
     preprocess = GPT2Preprocessing(pretrained.config)
     preprocess.wte.weight = pretrained.transformer.wte.weight
     preprocess.wpe.weight = pretrained.transformer.wpe.weight
@@ -71,10 +72,6 @@ def create_model_from_pretrained(model_name):
     blocks = pretrained.transformer.h
     for i, block in enumerate(blocks):
         block.__class__ = GPT2Block
-        # 0, 1, 2 => 0
-        # 3, 4, 5 => 1
-        # 6, 7, 8 => 2
-        # 9, 10, 11 => 3
 
     postprocess = GPT2PostProcess(pretrained.config)
     postprocess.ln_f.weight = pretrained.transformer.ln_f.weight
@@ -84,36 +81,76 @@ def create_model_from_pretrained(model_name):
     return nn.Sequential(preprocess, *blocks, postprocess)
 
 
+def collate_fn(batch):
+    batch_encoding = tokenizer.pad(
+        {"input_ids": batch}, padding="max_length", max_length=1024
+    )
+    return batch_encoding.input_ids
+
+
+def batch_fn(data):
+    input_ids = data
+    labels = data
+    return input_ids, labels
+
+
+def loss_fn(logits, labels):
+    logits = logits[..., :-1, :].contiguous()
+    labels = labels[..., 1:].contiguous()
+
+    return nn.CrossEntropyLoss()(
+        logits.view(-1, logits.size(-1)),
+        labels.view(-1),
+    )
+
+
 if __name__ == "__main__":
-    world_size = 4
-    model = create_model_from_pretrained(model_name="gpt2")
-    model = PipelineModule(model)
+    dist.init_process_group("nccl")
+    world_size, rank = dist.get_world_size(), dist.get_rank()
+    batch_size, train_steps = 16, 300
+    train_samples = batch_size * train_steps
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     tokenizer.pad_token = tokenizer.eos_token
+
+    model = PipelineModule(
+        create_model_from_pretrained(model_name="gpt2"),
+        loss_fn=loss_fn,
+        num_stages=world_size,
+        partition_method="type:GPT2Block"
+        # partition_method를 통해 병렬화 하고 싶은 레이어를 고를 수 있습니다.
+    )
+    engine, optimizer, _, _ = deepspeed.initialize(
+        model=model,
+        optimizer=Adam(model.parameters(), lr=3e-5),
+        config={
+            "train_batch_size": batch_size,
+            "steps_per_print": 9999999,
+            # turn off: https://github.com/microsoft/DeepSpeed/issues/1119
+        },
+    )
+    engine.set_batch_fn(batch_fn)
+
     datasets = load_dataset("squad").data["train"]["context"]
-    datasets = [str(sample) for sample in datasets]
-    data_loader = DataLoader(datasets, batch_size=8, num_workers=8)
-
-    optimizer = Adam(model.parameters(), lr=3e-5)
-    loss_fn = nn.CrossEntropyLoss()
-
-    for i, data in enumerate(data_loader):
-        optimizer.zero_grad()
-        tokens = tokenizer(data, return_tensors="pt", truncation=True, padding=True)
-        input_ids = tokens.input_ids.to(0)
-        labels = tokens.input_ids.to(world_size - 1)
-
-        lm_logits = model(input_ids)
-        shift_logits = lm_logits[..., :-1, :].contiguous()
-        shift_labels = labels[..., 1:].contiguous()
-        loss = nn.CrossEntropyLoss()(
-            shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+    datasets = [str(sample) for i, sample in enumerate(datasets) if i < train_samples]
+    datasets = [
+        tokenizer(data, return_tensors="pt", max_length=1024).input_ids[0]
+        for data in tqdm(datasets)
+    ]
+    data_loader = iter(
+        DataLoader(
+            sorted(datasets, key=len, reverse=True),
+            # uniform length batching
+            # https://mccormickml.com/2020/07/29/smart-batching-tutorial/
+            batch_size=batch_size,
+            num_workers=8,
+            collate_fn=collate_fn,
+            shuffle=False,
         )
-        loss.backward()
-        optimizer.step()
+    )
 
-        if i % 10 == 0:
+    for i in range(train_steps):
+        loss = engine.train_batch(data_loader)
+
+        if i % 10 == 0 and rank == 0:
             print(f"step: {i}, loss: {loss}")
-        if i == 300:
-            break

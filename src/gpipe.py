@@ -63,7 +63,6 @@ class GPT2PostProcess(nn.Module):
 
 def create_model_from_pretrained(model_name):
     pretrained = GPT2LMHeadModel.from_pretrained(model_name)
-
     preprocess = GPT2Preprocessing(pretrained.config)
     preprocess.wte.weight = pretrained.transformer.wte.weight
     preprocess.wpe.weight = pretrained.transformer.wpe.weight
@@ -71,10 +70,6 @@ def create_model_from_pretrained(model_name):
     blocks = pretrained.transformer.h
     for i, block in enumerate(blocks):
         block.__class__ = GPT2Block
-        # 0, 1, 2 => 0
-        # 3, 4, 5 => 1
-        # 6, 7, 8 => 2
-        # 9, 10, 11 => 3
 
     postprocess = GPT2PostProcess(pretrained.config)
     postprocess.ln_f.weight = pretrained.transformer.ln_f.weight
@@ -86,6 +81,10 @@ def create_model_from_pretrained(model_name):
 
 if __name__ == "__main__":
     world_size = 4
+
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    tokenizer.pad_token = tokenizer.eos_token
+
     model = create_model_from_pretrained(model_name="gpt2")
     model = GPipe(
         model,
@@ -94,8 +93,6 @@ if __name__ == "__main__":
         chunks=world_size,
     )
 
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokenizer.pad_token = tokenizer.eos_token
     datasets = load_dataset("squad").data["train"]["context"]
     datasets = [str(sample) for sample in datasets]
     data_loader = DataLoader(datasets, batch_size=8, num_workers=8)
